@@ -1,0 +1,463 @@
+{
+    "definition": {
+        "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+        "contentVersion": "1.0.0.0",
+        "triggers": {
+            "recurrence_daily": {
+                "recurrence": {
+                    "frequency": "Day",
+                    "interval": 1,
+                    "timeZone": "South Africa Standard Time",
+                    "schedule": {
+                        "hours": [
+                            4
+                        ],
+                        "minutes": [
+                            0
+                        ]
+                    }
+                },
+                "evaluatedRecurrence": {
+                    "frequency": "Day",
+                    "interval": 1,
+                    "timeZone": "South Africa Standard Time",
+                    "schedule": {
+                        "hours": [
+                            4
+                        ],
+                        "minutes": [
+                            0
+                        ]
+                    }
+                },
+                "type": "Recurrence"
+            }
+        },
+        "actions": {
+            "Init_Vars": {
+                "runAfter": {},
+                "type": "InitializeVariable",
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "SitePMC",
+                            "type": "string",
+                            "value": "https://ppetechcoza.sharepoint.com/sites/PMC"
+                        },
+                        {
+                            "name": "ListId_Master",
+                            "type": "string",
+                            "value": "0f86bc9c-2a38-43ef-925b-06f3c7ba9bb0"
+                        },
+                        {
+                            "name": "SiteDC",
+                            "type": "string",
+                            "value": "https://ppetechcoza.sharepoint.com/sites/DocumentControl"
+                        },
+                        {
+                            "name": "ListId_Index",
+                            "type": "string",
+                            "value": "e348e9d5-3fb3-45b2-951d-7b299826ce0d"
+                        }
+                    ]
+                }
+            },
+            "Get_Master_Items": {
+                "runAfter": {
+                    "Init_Vars": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "ApiConnection",
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['sharepointonline']['connectionId']"
+                        }
+                    },
+                    "method": "post",
+                    "body": {
+                        "method": "GET",
+                        "uri": "@{concat('/_api/web/lists(guid''', variables('ListId_Master'), ''')/items?$top=5000')}",
+                        "headers": {
+                            "Accept": "application/json;odata=verbose"
+                        }
+                    },
+                    "path": "/datasets/@{encodeURIComponent(encodeURIComponent(variables('SitePMC')))}/httprequest"
+                }
+            },
+            "ForEach_MasterItem": {
+                "foreach": "@coalesce(body('Get_Master_Items')?['d']?['results'], array())",
+                "actions": {
+                    "Compose_MasterId": {
+                        "type": "Compose",
+                        "inputs": "@{items('ForEach_MasterItem')?['Id']}"
+                    },
+                    "Compose_Master_DocNumber_Raw": {
+                        "runAfter": {
+                            "Compose_MasterId": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "Compose",
+                        "inputs": "@{trim(string(coalesce(items('ForEach_MasterItem')?['field_7'], '')))}"
+                    },
+                    "Compose_Master_Revision_Raw": {
+                        "runAfter": {
+                            "Compose_Master_DocNumber_Raw": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "Compose",
+                        "inputs": "@{trim(string(coalesce(items('ForEach_MasterItem')?['field_6'], '')))}"
+                    },
+                    "Compose_Master_DocKey_Current": {
+                        "runAfter": {
+                            "Compose_Master_Revision_Raw": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "Compose",
+                        "inputs": "@{trim(string(coalesce(items('ForEach_MasterItem')?['DocKey'], '')))}"
+                    },
+                    "Compose_Master_FileLink_CurrentUrl": {
+                        "runAfter": {
+                            "Compose_Master_DocKey_Current": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "Compose",
+                        "inputs": "@{coalesce(items('ForEach_MasterItem')?['FileLink']?['Url'], items('ForEach_MasterItem')?['FileLink'], '')}"
+                    },
+                    "Compose_UnderscoreIndex": {
+                        "runAfter": {
+                            "Compose_Master_FileLink_CurrentUrl": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "Compose",
+                        "inputs": "@if(equals(outputs('Compose_Master_DocNumber_Raw'), ''), int(-1), int(lastIndexOf(outputs('Compose_Master_DocNumber_Raw'), '_')))"
+                    },
+                    "Compose_HasUnderscoreSplit": {
+                        "runAfter": {
+                            "Compose_UnderscoreIndex": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "Compose",
+                        "inputs": "@and(greater(int(outputs('Compose_UnderscoreIndex')), int(0)), less(int(outputs('Compose_UnderscoreIndex')), int(sub(length(outputs('Compose_Master_DocNumber_Raw')), 1))))"
+                    },
+                    "Compose_BaseDocNum": {
+                        "runAfter": {
+                            "Compose_HasUnderscoreSplit": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "Compose",
+                        "inputs": "@if(and(equals(outputs('Compose_Master_Revision_Raw'), ''), equals(outputs('Compose_HasUnderscoreSplit'), true)), substring(outputs('Compose_Master_DocNumber_Raw'), 0, int(outputs('Compose_UnderscoreIndex'))), outputs('Compose_Master_DocNumber_Raw'))"
+                    },
+                    "Compose_RevFinal": {
+                        "runAfter": {
+                            "Compose_BaseDocNum": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "Compose",
+                        "inputs": "@if(not(equals(outputs('Compose_Master_Revision_Raw'), '')), outputs('Compose_Master_Revision_Raw'), if(equals(outputs('Compose_HasUnderscoreSplit'), true), substring(outputs('Compose_Master_DocNumber_Raw'), int(add(int(outputs('Compose_UnderscoreIndex')), 1)), int(sub(length(outputs('Compose_Master_DocNumber_Raw')), add(int(outputs('Compose_UnderscoreIndex')), 1)))), ''))"
+                    },
+                    "Compose_RevFinal_Trim": {
+                        "runAfter": {
+                            "Compose_RevFinal": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "Compose",
+                        "inputs": "@trim(string(outputs('Compose_RevFinal')))"
+                    },
+                    "Compose_MatchDocNumber": {
+                        "runAfter": {
+                            "Compose_RevFinal_Trim": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "Compose",
+                        "inputs": "@toUpper(if(endsWith(toUpper(outputs('Compose_Master_DocNumber_Raw')), concat('_', toUpper(outputs('Compose_RevFinal_Trim')))), outputs('Compose_Master_DocNumber_Raw'), if(and(greater(int(outputs('Compose_UnderscoreIndex')),0),equals(outputs('Compose_Master_Revision_Raw'),'')), outputs('Compose_Master_DocNumber_Raw'), concat(outputs('Compose_BaseDocNum'),'_',outputs('Compose_RevFinal_Trim')))))"
+                    },
+                    "Condition_HasKey": {
+                        "actions": {
+                            "Compose_MDDRKey_New": {
+                                "type": "Compose",
+                                "inputs": "@toLower(concat(outputs('Compose_BaseDocNum'), '_', outputs('Compose_RevFinal_Trim')))"
+                            },
+                            "Condition_Update_Master_DocKey_IfBlank": {
+                                "actions": {
+                                    "Update_Master_DocKey": {
+                                        "type": "ApiConnection",
+                                        "inputs": {
+                                            "host": {
+                                                "connection": {
+                                                    "name": "@parameters('$connections')['sharepointonline']['connectionId']"
+                                                }
+                                            },
+                                            "method": "post",
+                                            "body": {
+                                                "method": "POST",
+                                                "uri": "@concat('/_api/web/lists(guid''', variables('ListId_Master'), ''')/items(', string(outputs('Compose_MasterId')), ')')",
+                                                "headers": {
+                                                    "Accept": "application/json;odata=nometadata",
+                                                    "Content-Type": "application/json;odata=nometadata",
+                                                    "IF-MATCH": "*",
+                                                    "X-HTTP-Method": "MERGE"
+                                                },
+                                                "body": "@concat('{\"DocKey\":\"', replace(outputs('Compose_MDDRKey_New'), '\"', '\\\\\"'), '\"}')"
+                                            },
+                                            "path": "/datasets/@{encodeURIComponent(encodeURIComponent(variables('SitePMC')))}/httprequest"
+                                        }
+                                    }
+                                },
+                                "runAfter": {
+                                    "Compose_MDDRKey_New": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "else": {
+                                    "actions": {}
+                                },
+                                "expression": {
+                                    "equals": [
+                                        "@outputs('Compose_Master_DocKey_Current')",
+                                        ""
+                                    ]
+                                },
+                                "type": "If"
+                            },
+                            "Get_Index_Match": {
+                                "runAfter": {
+                                    "Condition_Update_Master_DocKey_IfBlank": [
+                                        "Succeeded",
+                                        "Skipped",
+                                        "Failed"
+                                    ]
+                                },
+                                "type": "ApiConnection",
+                                "inputs": {
+                                    "host": {
+                                        "connection": {
+                                            "name": "@parameters('$connections')['sharepointonline']['connectionId']"
+                                        }
+                                    },
+                                    "method": "post",
+                                    "body": {
+                                        "method": "GET",
+                                        "uri": "@concat('/_api/web/lists(guid''', variables('ListId_Index'), ''')/items?$select=Id,DocNumber,MDDRKey,FileLink,Url,URL&$filter=DocNumber eq ''', replace(outputs('Compose_MatchDocNumber'), '''', ''''''), '''&$top=1')",
+                                        "headers": {
+                                            "Accept": "application/json;odata=verbose"
+                                        }
+                                    },
+                                    "path": "/datasets/@{encodeURIComponent(encodeURIComponent(variables('SiteDC')))}/httprequest"
+                                }
+                            },
+                            "Compose_IndexItem": {
+                                "runAfter": {
+                                    "Get_Index_Match": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "type": "Compose",
+                                "inputs": "@if(equals(length(coalesce(body('Get_Index_Match')?['d']?['results'], array())), 0), json('{}'), first(coalesce(body('Get_Index_Match')?['d']?['results'], array())))"
+                            },
+                            "Condition_IndexFound": {
+                                "actions": {
+                                    "Compose_IndexId": {
+                                        "type": "Compose",
+                                        "inputs": "@int(coalesce(outputs('Compose_IndexItem')?['Id'], 0))"
+                                    },
+                                    "Compose_Index_MDDRKey_Current": {
+                                        "runAfter": {
+                                            "Compose_IndexId": [
+                                                "Succeeded"
+                                            ]
+                                        },
+                                        "type": "Compose",
+                                        "inputs": "@trim(string(coalesce(outputs('Compose_IndexItem')?['MDDRKey'], '')))"
+                                    },
+                                    "Compose_Index_UrlBest": {
+                                        "runAfter": {
+                                            "Compose_Index_MDDRKey_Current": [
+                                                "Succeeded"
+                                            ]
+                                        },
+                                        "type": "Compose",
+                                        "inputs": "@coalesce(outputs('Compose_IndexItem')?['Url']?['Url'], outputs('Compose_IndexItem')?['URL']?['Url'], outputs('Compose_IndexItem')?['FileLink']?['Url'], outputs('Compose_IndexItem')?['FileLink'], '')"
+                                    },
+                                    "Condition_Update_Index_MDDRKey_IfBlank": {
+                                        "actions": {
+                                            "Update_Index_MDDRKey": {
+                                                "type": "ApiConnection",
+                                                "inputs": {
+                                                    "host": {
+                                                        "connection": {
+                                                            "name": "@parameters('$connections')['sharepointonline']['connectionId']"
+                                                        }
+                                                    },
+                                                    "method": "post",
+                                                    "body": {
+                                                        "method": "POST",
+                                                        "uri": "@concat('/_api/web/lists(guid''', variables('ListId_Index'), ''')/items(', string(outputs('Compose_IndexId')), ')')",
+                                                        "headers": {
+                                                            "Accept": "application/json;odata=nometadata",
+                                                            "Content-Type": "application/json;odata=nometadata",
+                                                            "IF-MATCH": "*",
+                                                            "X-HTTP-Method": "MERGE"
+                                                        },
+                                                        "body": "@concat('{\"MDDRKey\":\"', replace(outputs('Compose_MDDRKey_New'), '\"', '\\\\\"'), '\"}')"
+                                                    },
+                                                    "path": "/datasets/@{encodeURIComponent(encodeURIComponent(variables('SiteDC')))}/httprequest"
+                                                }
+                                            }
+                                        },
+                                        "runAfter": {
+                                            "Compose_Index_UrlBest": [
+                                                "Succeeded"
+                                            ]
+                                        },
+                                        "else": {
+                                            "actions": {}
+                                        },
+                                        "expression": {
+                                            "equals": [
+                                                "@outputs('Compose_Index_MDDRKey_Current')",
+                                                ""
+                                            ]
+                                        },
+                                        "type": "If"
+                                    },
+                                    "Condition_Update_Master_FileLink_IfBlank": {
+                                        "actions": {
+                                            "Update_Master_FileLink": {
+                                                "type": "ApiConnection",
+                                                "inputs": {
+                                                    "host": {
+                                                        "connection": {
+                                                            "name": "@parameters('$connections')['sharepointonline']['connectionId']"
+                                                        }
+                                                    },
+                                                    "method": "post",
+                                                    "body": {
+                                                        "method": "POST",
+                                                        "uri": "@concat('/_api/web/lists(guid''', variables('ListId_Master'), ''')/items(', string(outputs('Compose_MasterId')), ')')",
+                                                        "headers": {
+                                                            "Accept": "application/json;odata=nometadata",
+                                                            "Content-Type": "application/json;odata=nometadata",
+                                                            "IF-MATCH": "*",
+                                                            "X-HTTP-Method": "MERGE"
+                                                        },
+                                                        "body": "@concat('{\"FileLink\":{\"Url\":\"', replace(trim(string(outputs('Compose_Index_UrlBest'))), '\"', '\\\\\"'), '\",\"Description\":\"Open\"}}')"
+                                                    },
+                                                    "path": "/datasets/@{encodeURIComponent(encodeURIComponent(variables('SitePMC')))}/httprequest"
+                                                }
+                                            }
+                                        },
+                                        "runAfter": {
+                                            "Condition_Update_Index_MDDRKey_IfBlank": [
+                                                "Succeeded",
+                                                "Skipped",
+                                                "Failed"
+                                            ]
+                                        },
+                                        "else": {
+                                            "actions": {}
+                                        },
+                                        "expression": {
+                                            "and": [
+                                                {
+                                                    "equals": [
+                                                        "@trim(string(outputs('Compose_Master_FileLink_CurrentUrl')))",
+                                                        ""
+                                                    ]
+                                                },
+                                                {
+                                                    "greater": [
+                                                        "@length(trim(string(outputs('Compose_Index_UrlBest'))))",
+                                                        0
+                                                    ]
+                                                }
+                                            ]
+                                        },
+                                        "type": "If"
+                                    }
+                                },
+                                "runAfter": {
+                                    "Compose_IndexItem": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "else": {
+                                    "actions": {}
+                                },
+                                "expression": {
+                                    "greater": [
+                                        "@int(coalesce(outputs('Compose_IndexItem')?['Id'], 0))",
+                                        0
+                                    ]
+                                },
+                                "type": "If"
+                            }
+                        },
+                        "runAfter": {
+                            "Compose_MatchDocNumber": [
+                                "Succeeded"
+                            ]
+                        },
+                        "else": {
+                            "actions": {}
+                        },
+                        "expression": {
+                            "and": [
+                                {
+                                    "greater": [
+                                        "@length(outputs('Compose_BaseDocNum'))",
+                                        0
+                                    ]
+                                },
+                                {
+                                    "greater": [
+                                        "@length(outputs('Compose_RevFinal_Trim'))",
+                                        0
+                                    ]
+                                }
+                            ]
+                        },
+                        "type": "If"
+                    }
+                },
+                "runAfter": {
+                    "Get_Master_Items": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "Foreach"
+            }
+        },
+        "outputs": {},
+        "parameters": {
+            "$connections": {
+                "type": "Object",
+                "defaultValue": {}
+            }
+        }
+    },
+    "parameters": {
+        "$connections": {
+            "type": "Object",
+            "value": {
+                "sharepointonline": {
+                    "id": "/subscriptions/427e2d56-2ab5-40b3-adbb-497ac927b13c/providers/Microsoft.Web/locations/southafricanorth/managedApis/sharepointonline",
+                    "connectionId": "/subscriptions/427e2d56-2ab5-40b3-adbb-497ac927b13c/resourceGroups/rg-vendor-approvals-prod/providers/Microsoft.Web/connections/sharepointonline",
+                    "connectionName": "sharepointonline",
+                    "connectionProperties": {}
+                }
+            }
+        }
+    }
+}
